@@ -1,0 +1,11 @@
+D:\Documents\ConorteClientAPI\bin\Debug\ConorteClientAPI.exe.config
+D:\Documents\ConorteClientAPI\bin\Debug\ConorteClientAPI.exe
+D:\Documents\ConorteClientAPI\bin\Debug\ConorteClientAPI.pdb
+D:\Documents\ConorteClientAPI\bin\Debug\Dapper.dll
+D:\Documents\ConorteClientAPI\bin\Debug\Newtonsoft.Json.dll
+D:\Documents\ConorteClientAPI\bin\Debug\Dapper.xml
+D:\Documents\ConorteClientAPI\bin\Debug\Newtonsoft.Json.xml
+D:\Documents\ConorteClientAPI\obj\Debug\ConorteClientAPI.csproj.CopyComplete
+D:\Documents\ConorteClientAPI\obj\Debug\ConorteClientAPI.exe
+D:\Documents\ConorteClientAPI\obj\Debug\ConorteClientAPI.pdb
+D:\Documents\ConorteClientAPI\obj\Debug\ConorteClientAPI.csprojAssemblyReference.cache
