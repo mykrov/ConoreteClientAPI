@@ -63,6 +63,8 @@ namespace ConorteClientAPI
                     APFACTURADET det_factura = new APFACTURADET();
 
                     string rucEmpresa = (string)json_obj["factura"]["infoTributaria"]["ruc"];
+                    
+                    // Consultar Número de Empresa dependiendo el RUC.
                     using (IDbConnection db2 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
                     {
                         string queryEmpresa = "SELECT EMPRESA FROM APEMPRESA WHERE RUC = '" + rucEmpresa + "'";
@@ -81,7 +83,8 @@ namespace ConorteClientAPI
 
                     if (count == 1)
                     {
-                        cab_factura.SUBTOTALCERO = Convert.ToSingle(0).ToString(cultureUS);
+                        cab_factura.SUBTOTALCERO = 0;
+                        cab_factura.IVAFAC = (decimal)json_obj["factura"]["infoFactura"]["totalConImpuestos"]["totalImpuesto"]["valor"];
                     }
                     else
                     {
@@ -95,11 +98,11 @@ namespace ConorteClientAPI
                             TotalImpuesto searchResult = result.ToObject<TotalImpuesto>();
                             if (searchResult.codigoPorcentaje == 0)
                             {
-                                cab_factura.SUBTOTALCERO = Convert.ToSingle(searchResult.baseImponible, cultureUS).ToString(cultureUS);
+                                cab_factura.SUBTOTALCERO = Convert.ToDecimal(searchResult.baseImponible, cultureUS);
                             }
                             else
                             {
-                                cab_factura.IVAFAC = Convert.ToSingle(searchResult.valor, cultureUS).ToString(cultureUS);
+                                cab_factura.IVAFAC = Convert.ToDecimal(searchResult.valor, cultureUS);
                             }
                             searchResults.Add(searchResult);
                         }
@@ -108,10 +111,9 @@ namespace ConorteClientAPI
                      
                     cab_factura.SERIE = estab + ptoEmi;
                     cab_factura.NUMERO = numero.ToString();
-                    cab_factura.SUBTOTALFAC = Convert.ToSingle(subtotalfac).ToString(cultureUS);
-                    cab_factura.DESCUENTOFAC = Convert.ToSingle(descuento).ToString(cultureUS);
-
-                    cab_factura.NETOFAC = Convert.ToSingle((string)json_obj["factura"]["infoFactura"]["importeTotal"], cultureUS).ToString(cultureUS);
+                    cab_factura.SUBTOTALFAC = Convert.ToDecimal(subtotalfac);
+                    cab_factura.DESCUENTOFAC = Convert.ToDecimal(descuento);
+                    cab_factura.NETOFAC = Convert.ToDecimal((decimal)json_obj["factura"]["infoFactura"]["importeTotal"], cultureUS);
                     cab_factura.FECHAEMI = (string)json_obj["factura"]["infoFactura"]["fechaEmision"];
                     cab_factura.FECHAVEN = cab_factura.FECHAEMI;
                     cab_factura.RUC = (string)json_obj["factura"]["infoFactura"]["identificacionComprador"];
@@ -142,9 +144,134 @@ namespace ConorteClientAPI
                     cab_factura.FORMAPAGO = (string)json_obj["factura"]["infoFactura"]["pagos"]["pago"]["formaPago"];
                     cab_factura.PLAZO = (string)json_obj["factura"]["infoFactura"]["pagos"]["pago"]["plazo"]; ;
                     cab_factura.CODCLIENTE = (string)json_obj["factura"]["infoFactura"]["identificacionComprador"];
-                    cab_factura.VENDEDOR = "VEND0001";
+                    cab_factura.VENDEDOR = "VEN1";
                     cab_factura.TIPO = "01";
 
+                    // Cambio de los código de tipos de identificación a los de APOLO.
+                    if (cab_factura.TIPOIDENTIFICACION == "04")
+                    {
+                        cab_factura.TIPOIDENTIFICACION = "R";
+                    }
+                    else if(cab_factura.TIPOIDENTIFICACION == "05")
+                    {
+                        cab_factura.TIPOIDENTIFICACION = "C";
+                    }
+                    else if(cab_factura.TIPOIDENTIFICACION == "07")
+                    {
+                        cab_factura.TIPOIDENTIFICACION = "F";
+                    }
+                    else
+                    {
+                        cab_factura.TIPOIDENTIFICACION = "0";
+                    }
+
+                    string secuencial = (string)json_obj["factura"]["infoTributaria"]["secuencial"];
+
+                    string documentID = cab_factura.TIPO + "-" + estab + "-" + ptoEmi + "-" + secuencial;
+
+                    //···················##################### DETALLES DE FACTURA ##########################................................
+
+                    //int countDet = (int)json_obj["factura"]["detalles"].Count();
+
+                    IList<JToken> detalles = json_obj["factura"]["detalles"]["detalle"].Children().ToList();
+                    int numLinea = 1;
+                    foreach (var detalle  in detalles)
+                    {
+                        det_factura.EMPRESA = cab_factura.EMPRESA;
+                        det_factura.SUCURSAL = 1;
+                        det_factura.SERIE = cab_factura.SERIE;
+                        det_factura.NUMERO = cab_factura.NUMERO;
+                        det_factura.LINEA = numLinea;
+                        det_factura.CODIGOPRI = (string)detalle["codigoPrincipal"].ToString();
+                        det_factura.CODIGOSEC = (string)detalle["codigoPrincipal"].ToString();
+                        det_factura.NOMBREITEM = (string)detalle["descripcion"].ToString();
+                        det_factura.TIPOITEM = "B";
+                        det_factura.CANTIDAD = (string)detalle["cantidad"].ToString();
+                        det_factura.PRECIO = Convert.ToDecimal((decimal)detalle["precioUnitario"], cultureUS);
+                        det_factura.SUBTOTAL = Convert.ToDecimal((decimal)detalle["precioTotalSinImpuesto"], cultureUS);
+                        det_factura.DESCUENTO = Convert.ToDecimal((decimal)detalle["descuento"], cultureUS);
+                        det_factura.PORDES = (decimal)detalle["descuento"];
+                        
+                        if (Convert.ToInt32((Int32)detalle["impuestos"]["impuesto"]["codigo"], cultureUS) == 0)
+                        {
+                            det_factura.IVA = 0;
+                            det_factura.GRABAIVA = "N";
+                            det_factura.PORIVA = 0;
+                            det_factura.NETO = det_factura.SUBTOTAL;
+                        }
+                        else
+                        {
+                            det_factura.IVA = Convert.ToDecimal((decimal)detalle["impuestos"]["impuesto"]["valor"], cultureUS);
+                            det_factura.NETO = det_factura.SUBTOTAL + det_factura.IVA;
+                            det_factura.GRABAIVA = "S" ;
+                            det_factura.PORIVA = Convert.ToDecimal((decimal)detalle["impuestos"]["impuesto"]["tarifa"], cultureUS);
+                        }
+                        numLinea++; 
+
+
+                    }
+
+
+                    using (IDbConnection con = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                    {
+                        //Revisar si ya ha sido insertada esa factura.
+                        string sqlExist = "SELECT COUNT(*) AS CONTADOR FROM APFACTURACAB WHERE SERIE = '" + cab_factura.SERIE + "' AND NUMERO = '" + cab_factura.NUMERO + "' AND EMPRESA = " + cab_factura.EMPRESA;
+                        dynamic result = con.Query(sqlExist).First();
+                        int contador = result.CONTADOR;
+                        if (contador == 0) 
+                        {
+                            
+                            using (IDbConnection db3 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                            {
+                                string querInsertCAB = "INSERT INTO APFACTURACAB(EMPRESA,SUCURSAL,SERIE,NUMERO,SUBTOTALFAC,SUBTOTALCERO,DESCUENTOFAC," +
+                                    "IVAFAC,NETOFAC,FECHAEMI,FECHAVEN,RUC,TIPOIDENTIFICACION,NOMBRE,DIRECCION,TELEFONOS,CORREO,OBSERVACION,FORMAPAGO," +
+                                    "PLAZO,CODCLIENTE,VENDEDOR,TIPO,DOCUMENTO_ID,ESMATRIZ,CLAVE) VALUES(@EMPRESA,@SUCURSAL,@SERIE,@NUMERO,@SUBTOTALFAC,@SUBTOTALCERO,@DESCUENTOFAC," +
+                                    "@IVAFAC,@NETOFAC,@FECHAEMI,@FECHAVEN,@RUC,@TIPOIDENTIFICACION,@NOMBRE,@DIRECCION,@TELEFONOS,@CORREO,@OBSERVACION," +
+                                    "@FORMAPAGO,@PLAZO,@CODCLIENTE,@VENDEDOR,@TIPO,@DOCUMENTO_ID,'S',@CLAVE)";
+                                try
+                                {
+                                    // Inserción de la cabecera de Factura.
+                                    var affectedRows = db3.Execute(querInsertCAB, new
+                                    {
+                                        @EMPRESA = cab_factura.EMPRESA,
+                                        @SUCURSAL = cab_factura.SUCURSAL,
+                                        @SERIE = cab_factura.SERIE,
+                                        @NUMERO = cab_factura.NUMERO,
+                                        @SUBTOTALFAC = cab_factura.SUBTOTALFAC,
+                                        @SUBTOTALCERO = cab_factura.SUBTOTALCERO,
+                                        @DESCUENTOFAC = cab_factura.DESCUENTOFAC,
+                                        @IVAFAC = cab_factura.IVAFAC,
+                                        @NETOFAC = cab_factura.NETOFAC,
+                                        @FECHAEMI = cab_factura.FECHAEMI,
+                                        @FECHAVEN = cab_factura.FECHAVEN,
+                                        @RUC = cab_factura.RUC,
+                                        @TIPOIDENTIFICACION = cab_factura.TIPOIDENTIFICACION,
+                                        @NOMBRE = cab_factura.NOMBRE,
+                                        @DIRECCION = cab_factura.DIRECCION,
+                                        @TELEFONOS = cab_factura.TELEFONOS,
+                                        @CORREO = cab_factura.CORREO,
+                                        @OBSERVACION = cab_factura.OBSERVACION,
+                                        @FORMAPAGO = cab_factura.FORMAPAGO,
+                                        @PLAZO = cab_factura.PLAZO,
+                                        @CODCLIENTE = cab_factura.CODCLIENTE,
+                                        @VENDEDOR = cab_factura.VENDEDOR,
+                                        @TIPO = cab_factura.TIPO,
+                                        @DOCUMENTO_ID = documentID,
+                                        @CLAVE = cab_factura.CODCLIENTE
+                                    });
+                                    Console.WriteLine("Nueva Cabecera de Factura Insertada en APOLO." +affectedRows);
+                                }
+                                catch (Exception e)
+                                {
+                                    throw e;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("Factura ya Existe en APOLO.");
+                        }
+                    }
                     //agregar cabecera al array.
                     //cabcerasFac.Add(cab_factura);
                     //Uri ul = new Uri("http://apiapolo.test:8088");

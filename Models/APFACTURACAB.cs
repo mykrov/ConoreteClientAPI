@@ -12,11 +12,11 @@ namespace ConorteClientAPI.Models
         public int SUCURSAL { get; set; }
         public string SERIE { get; set; }
         public string NUMERO { get; set; }
-        public string SUBTOTALFAC { get; set; }
-        public string SUBTOTALCERO { get; set; }
-        public string DESCUENTOFAC { get; set; }
-        public string IVAFAC { get; set; }
-        public string NETOFAC { get; set; }
+        public decimal SUBTOTALFAC { get; set; }
+        public decimal SUBTOTALCERO { get; set; }
+        public decimal DESCUENTOFAC { get; set; }
+        public decimal IVAFAC { get; set; }
+        public decimal NETOFAC { get; set; }
         public string FECHAEMI { get; set; }
         public string FECHAVEN { get; set; }
         public string RUC { get; set; }

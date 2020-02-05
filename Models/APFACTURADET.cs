@@ -8,11 +8,11 @@ namespace ConorteClientAPI.Models
 {
     class APFACTURADET
     {
-        public string EMPRESA { get; set; }
-        public string SUCURSAL { get; set; }
+        public int EMPRESA { get; set; }
+        public int SUCURSAL { get; set; }
         public string SERIE { get; set; }
         public string NUMERO { get; set; }
-        public string LINEA { get; set; }
+        public int LINEA { get; set; }
         public string CODIGOPRI { get; set; }
         public string CODIGOSEC { get; set; }
         public string NOMBREITEM { get; set; }
