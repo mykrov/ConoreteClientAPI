@@ -67,10 +67,13 @@
   <ItemGroup>
     <Compile Include="Models\APFACTURACAB.cs" />
     <Compile Include="Models\APFACTURADET.cs" />
+    <Compile Include="Models\APNCRCAB.cs" />
+    <Compile Include="Models\APNCRDET.cs" />
     <Compile Include="Models\APRETENCION.cs" />
     <Compile Include="Models\APRETENCION_DET.cs" />
     <Compile Include="Models\ArchivoXML.cs" />
     <Compile Include="Models\Class\DecimalJsonConverter.cs" />
+    <Compile Include="Models\Class\SerializerM.cs" />
     <Compile Include="Models\Notificacion.cs" />
     <Compile Include="Models\TotalImpuesto.cs" />
     <Compile Include="Program.cs" />

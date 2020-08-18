@@ -9,13 +9,46 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Xml;
+using System.Xml.Linq;
+using System.Xml.Serialization;
 using ConorteClientAPI.Models;
+using ConorteClientAPI.Models.Class;
 using Dapper;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Linq;
+using System.Threading;
+
 
 namespace ConorteClientAPI
 {
+    public class detalles
+    {
+        List<detalle> detalle { get; set; }
+    }
+
+    public class detalle
+    {
+        public string codigoInterno { get; set; }
+        public string descripcion { get; set; }
+        public string cantidad { get; set; }
+        public string precioUnitario { get; set; }
+        public string descuento { get; set; }
+        public string pecioTotalSinImpuesto { get; set; }
+        public List<impuesto> impuestos { get; set; }
+
+    }
+
+    public class impuesto
+    {
+        public string codigo { get; set; }
+        public string codigoPorcentaje { get; set; }
+        public string tarifa { get; set; }
+        public string baseImponible { get; set; }
+        public string valor { get; set; }
+    }
+
+
     class Program
     {
         public static List<ArchivoXML> facturas = new List<ArchivoXML>();
@@ -50,7 +83,9 @@ namespace ConorteClientAPI
 
                 facturas_proccess();
                 retenciones_proccess();
-                //Console.ReadKey();
+                notaCredito_proccess();
+
+                Thread.Sleep(2000);
             }
 
         }
@@ -74,7 +109,7 @@ namespace ConorteClientAPI
                     APFACTURADET det_factura = new APFACTURADET();
 
                     string rucEmpresa = (string)json_obj["factura"]["infoTributaria"]["ruc"];
-                    
+
                     // Consultar Número de Empresa dependiendo el RUC.
                     using (IDbConnection db2 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
                     {
@@ -119,7 +154,7 @@ namespace ConorteClientAPI
                         }
                     }
 
-                     
+
                     cab_factura.SERIE = estab + ptoEmi;
                     cab_factura.NUMERO = numero.ToString();
                     cab_factura.SUBTOTALFAC = Convert.ToDecimal(subtotalfac);
@@ -156,18 +191,18 @@ namespace ConorteClientAPI
                     cab_factura.PLAZO = (string)json_obj["factura"]["infoFactura"]["pagos"]["pago"]["plazo"]; ;
                     cab_factura.CODCLIENTE = (string)json_obj["factura"]["infoFactura"]["identificacionComprador"];
                     cab_factura.VENDEDOR = "VEN1";
-                    cab_factura.TIPO = "01";
+                    cab_factura.TIPO = "FAC";
 
                     // Cambio de los código de tipos de identificación a los de APOLO.
                     if (cab_factura.TIPOIDENTIFICACION == "04")
                     {
                         cab_factura.TIPOIDENTIFICACION = "R";
                     }
-                    else if(cab_factura.TIPOIDENTIFICACION == "05")
+                    else if (cab_factura.TIPOIDENTIFICACION == "05")
                     {
                         cab_factura.TIPOIDENTIFICACION = "C";
                     }
-                    else if(cab_factura.TIPOIDENTIFICACION == "07")
+                    else if (cab_factura.TIPOIDENTIFICACION == "07")
                     {
                         cab_factura.TIPOIDENTIFICACION = "F";
                     }
@@ -178,16 +213,16 @@ namespace ConorteClientAPI
 
                     string secuencial = (string)json_obj["factura"]["infoTributaria"]["secuencial"];
                     string documentID = cab_factura.TIPO + "-" + estab + "-" + ptoEmi + "-" + secuencial;
-                    
+
                     using (IDbConnection con = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
                     {
                         //Revisar si ya ha sido insertada esa factura.
                         string sqlExist = "SELECT COUNT(*) AS CONTADOR FROM APFACTURACAB WHERE SERIE = '" + cab_factura.SERIE + "' AND NUMERO = '" + cab_factura.NUMERO + "' AND EMPRESA = " + cab_factura.EMPRESA;
                         dynamic result = con.Query(sqlExist).First();
                         int contador = result.CONTADOR;
-                        if (contador == 0) 
+                        if (contador == 0)
                         {
-                            
+
                             using (IDbConnection db3 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
                             {
                                 string querInsertCAB = "INSERT INTO APFACTURACAB(EMPRESA,SUCURSAL,SERIE,NUMERO,SUBTOTALFAC,SUBTOTALCERO,DESCUENTOFAC," +
@@ -226,44 +261,56 @@ namespace ConorteClientAPI
                                         @DOCUMENTO_ID = documentID,
                                         @CLAVE = cab_factura.CODCLIENTE
                                     });
-                                   // Console.WriteLine("Nueva Cabecera de Factura Insertada en APOLO. " + cab_factura.NUMERO);
+                                    Console.WriteLine("Nueva Cabecera de Factura Insertada en APOLO. " + cab_factura.NUMERO);
 
                                     //···················##################### DETALLES DE FACTURA ##########################................................
 
                                     IList<JToken> detalles = json_obj["factura"]["detalles"]["detalle"].Children().ToList();
+
+                                    //Nuevo procedimiento para solucion de un unico detalle.
                                     int numLinea = 1;
-                                    foreach (var detalle in detalles)
+                                    var xml = XElement.Parse(xml_fac);
+                                    SerializerM ser = new SerializerM();
+                                    var detallesFAC = xml.DescendantsAndSelf("detalle");
+
+                                    foreach (var detalleIndividual in detallesFAC)
                                     {
                                         det_factura.EMPRESA = cab_factura.EMPRESA;
                                         det_factura.SUCURSAL = 1;
                                         det_factura.SERIE = cab_factura.SERIE;
                                         det_factura.NUMERO = cab_factura.NUMERO;
                                         det_factura.LINEA = numLinea;
-                                        det_factura.CODIGOPRI = (string)detalle["codigoPrincipal"].ToString();
-                                        det_factura.CODIGOSEC = (string)detalle["codigoPrincipal"].ToString();
-                                        det_factura.NOMBREITEM = (string)detalle["descripcion"].ToString();
+                                        det_factura.CODIGOPRI = detalleIndividual.Element("codigoPrincipal").Value.Trim();
+                                        det_factura.CODIGOSEC = detalleIndividual.Element("codigoPrincipal").Value.Trim();
+                                        det_factura.NOMBREITEM = detalleIndividual.Element("descripcion").Value.Trim();
                                         det_factura.TIPOITEM = "B";
-                                        det_factura.CANTIDAD = (string)detalle["cantidad"].ToString();
-                                        det_factura.PRECIO = Convert.ToDecimal((decimal)detalle["precioUnitario"], cultureUS);
-                                        det_factura.SUBTOTAL = Convert.ToDecimal((decimal)detalle["precioTotalSinImpuesto"], cultureUS);
-                                        det_factura.DESCUENTO = Convert.ToDecimal((decimal)detalle["descuento"], cultureUS);
-                                        det_factura.PORDES = (decimal)detalle["descuento"];
+                                        det_factura.CANTIDAD = detalleIndividual.Element("cantidad").Value.Trim();
+                                        det_factura.PRECIO = Convert.ToDecimal(detalleIndividual.Element("precioUnitario").Value.Trim(), cultureUS);
+                                        det_factura.SUBTOTAL = Convert.ToDecimal(detalleIndividual.Element("precioTotalSinImpuesto").Value.Trim(), cultureUS);
+                                        det_factura.DESCUENTO = Convert.ToDecimal(detalleIndividual.Element("descuento").Value.Trim(), cultureUS);
 
-                                        if (Convert.ToInt32((Int32)detalle["impuestos"]["impuesto"]["codigo"], cultureUS) == 0)
-                                        {
-                                            det_factura.IVA = 0;
-                                            det_factura.GRABAIVA = "N";
-                                            det_factura.PORIVA = 0;
-                                            det_factura.NETO = det_factura.SUBTOTAL;
-                                        }
-                                        else
-                                        {
-                                            det_factura.IVA = Convert.ToDecimal((decimal)detalle["impuestos"]["impuesto"]["valor"], cultureUS);
-                                            det_factura.NETO = det_factura.SUBTOTAL + det_factura.IVA;
-                                            det_factura.GRABAIVA = "S";
-                                            det_factura.PORIVA = Convert.ToDecimal((decimal)detalle["impuestos"]["impuesto"]["tarifa"], cultureUS);
-                                        }
+                                        //Impuestos del Detalle
+                                        var impuestos = detalleIndividual.DescendantsAndSelf("impuesto");
 
+                                        foreach (var impuesto1 in impuestos)
+                                        {
+                                            if (Convert.ToInt32(impuesto1.Element("codigo").Value.Trim()) == 0)
+                                            {
+                                                det_factura.IVA = 0;
+                                                det_factura.GRABAIVA = "N";
+                                                det_factura.PORIVA = 0;
+                                                det_factura.NETO = det_factura.SUBTOTAL;
+                                                Console.WriteLine("el impuesto es de codigo 0");
+                                            }
+                                            else
+                                            {
+                                                det_factura.IVA = Convert.ToDecimal(impuesto1.Element("valor").Value.Trim(), cultureUS);
+                                                det_factura.NETO = det_factura.SUBTOTAL + det_factura.IVA;
+                                                det_factura.GRABAIVA = "S";
+                                                det_factura.PORIVA = Convert.ToDecimal(impuesto1.Element("tarifa").Value.Trim(), cultureUS);
+                                                Console.WriteLine("el impuesto de diferente codigo ");
+                                            }
+                                        }
 
                                         using (IDbConnection con2 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
                                         {
@@ -304,7 +351,7 @@ namespace ConorteClientAPI
                                                             @PORDES = det_factura.PORDES,
                                                             @DETALLE = "Detalle MasterWare"
                                                         });
-                                                       // Console.WriteLine("Nuevo Detalle de Factura Insertada en APOLO. " + affectedRows2);
+                                                        // Console.WriteLine("Nuevo Detalle de Factura Insertada en APOLO. " + affectedRows2);
                                                         numLinea++;
                                                     }
                                                     catch (Exception e)
@@ -315,11 +362,101 @@ namespace ConorteClientAPI
                                             }
                                             else
                                             {
-                                               // Console.WriteLine("Detalle ya Existe en APOLO.");
+                                                // Console.WriteLine("Detalle ya Existe en APOLO.");
                                                 numLinea++;
                                             }
                                         }
                                     }
+
+
+                                    //foreach (var detalle in detalles)
+                                    //{
+                                    //    det_factura.EMPRESA = cab_factura.EMPRESA;
+                                    //    det_factura.SUCURSAL = 1;
+                                    //    det_factura.SERIE = cab_factura.SERIE;
+                                    //    det_factura.NUMERO = cab_factura.NUMERO;
+                                    //    det_factura.LINEA = numLinea;
+                                    //    det_factura.CODIGOPRI = (string)detalle["codigoPrincipal"].ToString();
+                                    //    det_factura.CODIGOSEC = (string)detalle["codigoPrincipal"].ToString();
+                                    //    det_factura.NOMBREITEM = (string)detalle["descripcion"].ToString();
+                                    //    det_factura.TIPOITEM = "B";
+                                    //    det_factura.CANTIDAD = (string)detalle["cantidad"].ToString();
+                                    //    det_factura.PRECIO = Convert.ToDecimal((decimal)detalle["precioUnitario"], cultureUS);
+                                    //    det_factura.SUBTOTAL = Convert.ToDecimal((decimal)detalle["precioTotalSinImpuesto"], cultureUS);
+                                    //    det_factura.DESCUENTO = Convert.ToDecimal((decimal)detalle["descuento"], cultureUS);
+                                    //    det_factura.PORDES = (decimal)detalle["descuento"];
+
+                                    //    if (Convert.ToInt32((Int32)detalle["impuestos"]["impuesto"]["codigo"], cultureUS) == 0)
+                                    //    {
+                                    //        det_factura.IVA = 0;
+                                    //        det_factura.GRABAIVA = "N";
+                                    //        det_factura.PORIVA = 0;
+                                    //        det_factura.NETO = det_factura.SUBTOTAL;
+                                    //    }
+                                    //    else
+                                    //    {
+                                    //        det_factura.IVA = Convert.ToDecimal((decimal)detalle["impuestos"]["impuesto"]["valor"], cultureUS);
+                                    //        det_factura.NETO = det_factura.SUBTOTAL + det_factura.IVA;
+                                    //        det_factura.GRABAIVA = "S";
+                                    //        det_factura.PORIVA = Convert.ToDecimal((decimal)detalle["impuestos"]["impuesto"]["tarifa"], cultureUS);
+                                    //    }
+
+
+                                    //    using (IDbConnection con2 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                                    //    {
+                                    //        //Revisar si ya ha sido insertada esa factura.
+                                    //        string sqlExist2 = "SELECT COUNT(*) AS CONTADOR FROM APFACTURADET WHERE SERIE = '" + cab_factura.SERIE + "' AND NUMERO = '" + cab_factura.NUMERO + "' AND EMPRESA = " + cab_factura.EMPRESA + "AND LINEA = " + numLinea;
+                                    //        dynamic result2 = con.Query(sqlExist).First();
+                                    //        int contador2 = result.CONTADOR;
+                                    //        if (contador == 0)
+                                    //        {
+
+                                    //            using (IDbConnection db32 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                                    //            {
+                                    //                string querInsertDET = "INSERT INTO APFACTURADET(EMPRESA,SUCURSAL,SERIE,NUMERO,LINEA,CODIGOPRI,CODIGOSEC,NOMBREITEM,TIPOITEM," +
+                                    //                    "CANTIDAD,PRECIO,SUBTOTAL,DESCUENTO,IVA,NETO,GRABAIVA,PORIVA,PORDES,DETALLE) VALUES(@EMPRESA,@SUCURSAL,@SERIE,@NUMERO,@LINEA," +
+                                    //                    "@CODIGOPRI,@CODIGOSEC,@NOMBREITEM,@TIPOITEM,@CANTIDAD,@PRECIO,@SUBTOTAL,@DESCUENTO,@IVA,@NETO,@GRABAIVA,@PORIVA,@PORDES,@DETALLE)";
+                                    //                try
+                                    //                {
+                                    //                    // Inserción de la cabecera de Factura.
+                                    //                    var affectedRows2 = db32.Execute(querInsertDET, new
+                                    //                    {
+                                    //                        @EMPRESA = det_factura.EMPRESA,
+                                    //                        @SUCURSAL = det_factura.SUCURSAL,
+                                    //                        @SERIE = det_factura.SERIE,
+                                    //                        @NUMERO = det_factura.NUMERO,
+                                    //                        @LINEA = det_factura.LINEA,
+                                    //                        @CODIGOPRI = det_factura.CODIGOPRI,
+                                    //                        @CODIGOSEC = det_factura.CODIGOSEC,
+                                    //                        @NOMBREITEM = det_factura.NOMBREITEM,
+                                    //                        @TIPOITEM = det_factura.TIPOITEM,
+                                    //                        @CANTIDAD = det_factura.CANTIDAD,
+                                    //                        @PRECIO = det_factura.PRECIO,
+                                    //                        @SUBTOTAL = det_factura.SUBTOTAL,
+                                    //                        @DESCUENTO = det_factura.DESCUENTO,
+                                    //                        @IVA = det_factura.IVA,
+                                    //                        @NETO = det_factura.NETO,
+                                    //                        @GRABAIVA = det_factura.GRABAIVA,
+                                    //                        @PORIVA = det_factura.PORIVA,
+                                    //                        @PORDES = det_factura.PORDES,
+                                    //                        @DETALLE = "Detalle MasterWare"
+                                    //                    });
+                                    //                    // Console.WriteLine("Nuevo Detalle de Factura Insertada en APOLO. " + affectedRows2);
+                                    //                    numLinea++;
+                                    //                }
+                                    //                catch (Exception e)
+                                    //                {
+                                    //                    throw e;
+                                    //                }
+                                    //            }
+                                    //        }
+                                    //        else
+                                    //        {
+                                    //            // Console.WriteLine("Detalle ya Existe en APOLO.");
+                                    //            numLinea++;
+                                    //        }
+                                    //    }
+                                    //}
                                 }
                                 catch (Exception e)
                                 {
@@ -329,7 +466,7 @@ namespace ConorteClientAPI
                         }
                         else
                         {
-                            //Console.WriteLine("Factura ya Existe en APOLO.");
+                            Console.WriteLine("Factura ya Existe en APOLO.");
                         }
                     }
                     //agregar cabecera al array.
@@ -372,7 +509,7 @@ namespace ConorteClientAPI
                     string estab = (string)json_obj["comprobanteRetencion"]["infoTributaria"]["estab"];
                     string ptoEmi = (string)json_obj["comprobanteRetencion"]["infoTributaria"]["ptoEmi"];
                     long numero = (long)json_obj["comprobanteRetencion"]["infoTributaria"]["secuencial"];
-                    
+
                     cab_ret.SERIERET = estab + ptoEmi;
                     cab_ret.NUMERORET = numero;
                     cab_ret.RUCRET = (string)json_obj["comprobanteRetencion"]["infoCompRetencion"]["identificacionSujetoRetenido"];
@@ -463,7 +600,7 @@ namespace ConorteClientAPI
                                     //···················##################### DETALLES DE RETENCIÓN ##########################.
 
                                     IList<JToken> detalles = json_obj["comprobanteRetencion"]["impuestos"]["impuesto"].Children().ToList();
-                                   
+
                                     foreach (var detalle in detalles)
                                     {
                                         det_ret.EMPRESA = cab_ret.EMPRESA;
@@ -500,7 +637,7 @@ namespace ConorteClientAPI
                                         det_ret.PORRET = (decimal)detalle["porcentajeRetener"];
                                         det_ret.MONTORET = (decimal)detalle["valorRetenido"];
                                         det_ret.CODRET = (string)detalle["codigoRetencion"];
-                                        
+
                                         string tipoRetdet = (string)detalle["codigo"];
                                         if (tipoRetdet == "1")
                                         {
@@ -553,7 +690,7 @@ namespace ConorteClientAPI
                                             }
                                             else
                                             {
-                                               // Console.WriteLine("Detalle Retención ya Existe en APOLO.");
+                                                // Console.WriteLine("Detalle Retención ya Existe en APOLO.");
                                             }
                                         }
                                     }
@@ -566,7 +703,7 @@ namespace ConorteClientAPI
                         }
                         else
                         {
-                           // Console.WriteLine("Retención ya Existe en APOLO.");
+                            // Console.WriteLine("Retención ya Existe en APOLO.");
                         }
                     }
                     //agregar cabecera al array.
@@ -578,6 +715,332 @@ namespace ConorteClientAPI
 
         }
 
+        public static void notaCredito_proccess()
+        {
+            System.IFormatProvider cultureUS = new System.Globalization.CultureInfo("en-US");
+
+            if (ncr.Count > 0)
+            {
+                List<APNCRCAB> cabcerasNCR = new List<APNCRCAB>();
+                foreach (ArchivoXML item in ncr)
+                {
+                    string xml_ncr = item.XML;
+
+
+
+                    XmlDocument doc_xml = new XmlDocument();
+                    doc_xml.LoadXml(xml_ncr);
+                    string jsonText = JsonConvert.SerializeXmlNode(doc_xml);
+                    JObject json_obj = JObject.Parse(jsonText);
+
+                    APNCRCAB cab_ncr = new APNCRCAB();
+                    APNCRDET det_ncr = new APNCRDET();
+
+                    string rucEmpresa = (string)json_obj["notaCredito"]["infoTributaria"]["ruc"];
+
+                    // Consultar Número de Empresa dependiendo el RUC.
+                    using (IDbConnection db2 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                    {
+                        string queryEmpresa = "SELECT EMPRESA FROM APEMPRESA WHERE RUC = '" + rucEmpresa + "'";
+                        dynamic row = db2.Query(queryEmpresa).First();
+                        int empresa = Convert.ToInt32(row.EMPRESA);
+                        cab_ncr.EMPRESA = empresa;
+                    }
+                    cab_ncr.SUCURSAL = 1;
+                    string estab = (string)json_obj["notaCredito"]["infoTributaria"]["estab"];
+                    string ptoEmi = (string)json_obj["notaCredito"]["infoTributaria"]["ptoEmi"];
+                    long numero = (long)json_obj["notaCredito"]["infoTributaria"]["secuencial"];
+                    decimal subtotalfac = (decimal)json_obj["notaCredito"]["infoNotaCredito"]["totalSinImpuestos"];
+                    //decimal descuento = (decimal)json_obj["notaCredito"]["infoNotaCredito"]["totalDescuento"];
+
+                    int count = (int)json_obj["notaCredito"]["infoNotaCredito"]["totalConImpuestos"].Count();
+
+                    if (count == 1)
+                    {
+                        cab_ncr.SUBTOTALCERO = 0;
+                        cab_ncr.IVAFAC = (decimal)json_obj["notaCredito"]["infoNotaCredito"]["totalConImpuestos"]["totalImpuesto"]["valor"];
+                    }
+                    else
+                    {
+                        IList<JToken> results = json_obj["notaCredito"]["infoNotaCredito"]["totalConImpuestos"]["totalImpuesto"].Children().ToList();
+
+                        // serialize JSON results into .NET objects
+                        IList<TotalImpuesto> searchResults = new List<TotalImpuesto>();
+                        foreach (JToken result in results)
+                        {
+                            // JToken.ToObject is a helper method that uses JsonSerializer internally
+                            TotalImpuesto searchResult = result.ToObject<TotalImpuesto>();
+                            if (searchResult.codigoPorcentaje == 0)
+                            {
+                                cab_ncr.SUBTOTALCERO = Convert.ToDecimal(searchResult.baseImponible, cultureUS);
+                            }
+                            else
+                            {
+                                cab_ncr.IVAFAC = Convert.ToDecimal(searchResult.valor, cultureUS);
+                            }
+                            searchResults.Add(searchResult);
+                        }
+                    }
+
+
+                    cab_ncr.SERIE = estab + ptoEmi;
+                    cab_ncr.NUMERO = numero.ToString();
+                    cab_ncr.SUBTOTALNCR = Convert.ToDecimal(subtotalfac);
+                    cab_ncr.DESCUENTONCR = 0;
+                    cab_ncr.NETOFAC = Convert.ToDecimal((decimal)json_obj["notaCredito"]["infoNotaCredito"]["valorModificacion"], cultureUS);
+                    cab_ncr.FECHAEMI = (string)json_obj["notaCredito"]["infoNotaCredito"]["fechaEmision"];
+                    cab_ncr.FECHADOC = cab_ncr.FECHAEMI;
+                    cab_ncr.RUC = (string)json_obj["notaCredito"]["infoNotaCredito"]["identificacionComprador"];
+                    cab_ncr.TIPOIDENTIFICACION = (string)json_obj["notaCredito"]["infoNotaCredito"]["tipoIdentificacionComprador"];
+                    cab_ncr.NOMBRE = (string)json_obj["notaCredito"]["infoNotaCredito"]["razonSocialComprador"];
+                    cab_ncr.CORREO = "test@gmail.com";
+                    cab_ncr.TELEFONOS = "";
+                    cab_ncr.DIRECCION = "";
+                    cab_ncr.ESMATRIZ = "S";
+
+                    IList<JToken> camposAdi = json_obj["notaCredito"]["infoAdicional"]["campoAdicional"].Children().ToList();
+
+                    foreach (JToken itemAdi in camposAdi)
+                    {
+                        if (itemAdi.Value<string>("@nombre") == "direccion")
+                        {
+                            cab_ncr.DIRECCION = (string)itemAdi["#text"];
+                        }
+                        else if (itemAdi.Value<string>("@nombre") == "telefono")
+                        {
+                            cab_ncr.TELEFONOS = (string)itemAdi["#text"];
+                        }
+                        else if (itemAdi.Value<string>("@nombre") == "correo")
+                        {
+                            cab_ncr.CORREO = (string)itemAdi["#text"];
+                        }
+                    }
+
+                    cab_ncr.OBSERVACION = "NCR desde MasterWare";
+
+                    //cab_ncr.PLAZO = (string)json_obj["notaCredito"]["infoFactura"]["pagos"]["pago"]["plazo"]; ;
+                    //cab_ncr.CODCLIENTE = (string)json_obj["notaCredito"]["infoFactura"]["identificacionComprador"];
+                    //cab_ncr.VENDEDOR = "VEN1";
+                    cab_ncr.TIPO = "NCR";
+
+                    // Cambio de los código de tipos de identificación a los de APOLO.
+                    if (cab_ncr.TIPOIDENTIFICACION == "04")
+                    {
+                        cab_ncr.TIPOIDENTIFICACION = "R";
+                    }
+                    else if (cab_ncr.TIPOIDENTIFICACION == "05")
+                    {
+                        cab_ncr.TIPOIDENTIFICACION = "C";
+                    }
+                    else if (cab_ncr.TIPOIDENTIFICACION == "07")
+                    {
+                        cab_ncr.TIPOIDENTIFICACION = "F";
+                    }
+                    else
+                    {
+                        cab_ncr.TIPOIDENTIFICACION = "0";
+                    }
+
+                    string secuencial = (string)json_obj["notaCredito"]["infoTributaria"]["secuencial"];
+                    string documentID = cab_ncr.TIPO + "-" + estab + "-" + ptoEmi + "-" + secuencial;
+
+                    using (IDbConnection con = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                    {
+                        //Revisar si ya ha sido insertada esa factura.
+                        string sqlExist = "SELECT COUNT(*) AS CONTADOR FROM APNCRCAB WHERE SERIE = '" + cab_ncr.SERIE + "' AND NUMERO = '" + cab_ncr.NUMERO + "' AND EMPRESA = " + cab_ncr.EMPRESA;
+                        dynamic result = con.Query(sqlExist).First();
+                        int contador = result.CONTADOR;
+                        if (contador == 0)
+                        {
+
+                            using (IDbConnection db3 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                            {
+                                string querInsertCAB2 = "INSERT INTO APNCRCAB(EMPRESA,SUCURSAL,SERIE,NUMERO,SUBTOTALNCR,SUBTOTALCERO,DESCUENTONCR," +
+                                    "IVAFAC,NETOFAC,FECHAEMI,FECHADOC,RUC,TIPOIDENTIFICACION,NOMBRE,DIRECCION,TELEFONOS,CORREO,OBSERVACION," +
+                                    "TIPO,DOCUMENTO_ID,ESMATRIZ) VALUES(@EMPRESA,@SUCURSAL,@SERIE,@NUMERO,@SUBTOTALNCR,@SUBTOTALCERO,@DESCUENTONCR," +
+                                    "@IVAFAC,@NETOFAC,@FECHAEMI,@FECHAEMI,@RUC,@TIPOIDENTIFICACION,@NOMBRE,@DIRECCION,@TELEFONOS,@CORREO,@OBSERVACION," +
+                                    "@TIPO,@DOCUMENTO_ID,@ESMATRIZ)";
+                                try
+                                {
+                                    // Inserción de la cabecera de Factura.
+                                    var affectedRows = db3.Execute(querInsertCAB2, new
+                                    {
+                                        @EMPRESA = cab_ncr.EMPRESA,
+                                        @SUCURSAL = cab_ncr.SUCURSAL,
+                                        @SERIE = cab_ncr.SERIE,
+                                        @NUMERO = cab_ncr.NUMERO,
+                                        @SUBTOTALNCR = cab_ncr.SUBTOTALNCR,
+                                        @SUBTOTALCERO = cab_ncr.SUBTOTALCERO,
+                                        @DESCUENTONCR = cab_ncr.DESCUENTONCR,
+                                        @IVAFAC = cab_ncr.IVAFAC,
+                                        @NETOFAC = cab_ncr.NETOFAC,
+                                        @FECHAEMI = cab_ncr.FECHAEMI,
+                                        @FECHADOC = cab_ncr.FECHADOC,
+                                        @RUC = cab_ncr.RUC,
+                                        @TIPOIDENTIFICACION = cab_ncr.TIPOIDENTIFICACION,
+                                        @NOMBRE = cab_ncr.NOMBRE,
+                                        @DIRECCION = cab_ncr.DIRECCION,
+                                        @TELEFONOS = cab_ncr.TELEFONOS,
+                                        @CORREO = cab_ncr.CORREO,
+                                        @OBSERVACION = cab_ncr.OBSERVACION,
+                                        //@FORMAPAGO = cab_ncr.FORMAPAGO,
+                                        //@PLAZO = cab_ncr.PLAZO,
+                                        //@CODCLIENTE = cab_ncr.CODCLIENTE,
+                                        //@VENDEDOR = cab_ncr.VENDEDOR,
+                                        @TIPO = cab_ncr.TIPO,
+                                        @DOCUMENTO_ID = documentID,
+                                        @ESMATRIZ = cab_ncr.ESMATRIZ,
+                                        //@CLAVE = cab_ncr.CODCLIENTE
+                                    });
+                                    Console.WriteLine("Nueva Cabecera de NCR Insertada en APOLO. " + cab_ncr.NUMERO);
+
+                                    //···················##################### DETALLES DE NCR ##########################................................
+
+                                    int numLinea = 1;
+                                    var xml = XElement.Parse(xml_ncr);
+                                    SerializerM ser = new SerializerM();
+                                    var detallesNCR = xml.DescendantsAndSelf("detalle");
+
+                                    foreach (var detalleIndividual in detallesNCR)
+                                    {
+                                        det_ncr.EMPRESA = cab_ncr.EMPRESA;
+                                        det_ncr.SUCURSAL = 1;
+                                        det_ncr.SERIE = cab_ncr.SERIE;
+                                        det_ncr.NUMERO = cab_ncr.NUMERO;
+                                        det_ncr.LINEA = numLinea;
+                                        det_ncr.CODIGOPRI = detalleIndividual.Element("codigoInterno").Value.Trim();
+                                        det_ncr.CODIGOSEC = detalleIndividual.Element("codigoInterno").Value.Trim();
+                                        det_ncr.NOMBREITEM = detalleIndividual.Element("descripcion").Value.Trim();
+                                        det_ncr.TIPOITEM = "B";
+                                        det_ncr.CANTIDAD = detalleIndividual.Element("cantidad").Value.Trim();
+                                        det_ncr.PRECIO = Convert.ToDecimal(detalleIndividual.Element("precioUnitario").Value.Trim(), cultureUS);
+                                        det_ncr.SUBTOTAL = Convert.ToDecimal(detalleIndividual.Element("precioTotalSinImpuesto").Value.Trim(), cultureUS);
+                                        det_ncr.DESCUENTO = Convert.ToDecimal(detalleIndividual.Element("descuento").Value.Trim(), cultureUS);
+
+                                        //Impuestos del Detalle
+                                        var impuestos = detalleIndividual.DescendantsAndSelf("impuesto");
+
+                                        foreach (var impuesto1 in impuestos)
+                                        {
+                                            if (Convert.ToInt32(impuesto1.Element("codigo").Value.Trim()) == 0)
+                                            {
+                                                det_ncr.IVA = 0;
+                                                det_ncr.GRABAIVA = "N";
+                                                det_ncr.PORIVA = 0;
+                                                det_ncr.NETO = det_ncr.SUBTOTAL;
+                                                Console.WriteLine("el impuesto es de codigo 0");
+                                            }
+                                            else
+                                            {
+                                                det_ncr.IVA = Convert.ToDecimal(impuesto1.Element("valor").Value.Trim(), cultureUS);
+                                                det_ncr.NETO = det_ncr.SUBTOTAL + det_ncr.IVA;
+                                                det_ncr.GRABAIVA = "S";
+                                                det_ncr.PORIVA = Convert.ToDecimal(impuesto1.Element("tarifa").Value.Trim(), cultureUS);
+                                                Console.WriteLine("el impuesto de diferente codigo ");
+                                            }
+                                        }
+
+                                    }
+
+                                    //Guardar el Detalle
+                                    using (IDbConnection con2 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                                    {
+                                        //Revisar si ya ha sido insertado ese Detalle de NCR.
+                                        string sqlExist2 = "SELECT COUNT(*) AS CONTADOR FROM APNCRDET WHERE SERIE = '" + cab_ncr.SERIE + "' AND NUMERO = '" + cab_ncr.NUMERO + "' AND EMPRESA = " + cab_ncr.EMPRESA + "AND LINEA = " + numLinea;
+                                        dynamic result2 = con.Query(sqlExist).First();
+                                        int contador2 = result.CONTADOR;
+                                        if (contador == 0)
+                                        {
+                                            using (IDbConnection db32 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                                            {
+                                                string querInsertDET = "INSERT INTO APNCRDET(EMPRESA,SUCURSAL,SERIE,NUMERO,LINEA,CODIGOPRI,CODIGOSEC,NOMBREITEM,TIPOITEM," +
+                                                    "CANTIDAD,PRECIO,SUBTOTAL,DESCUENTO,IVA,NETO,GRABAIVA,PORIVA) VALUES(@EMPRESA,@SUCURSAL,@SERIE,@NUMERO,@LINEA," +
+                                                    "@CODIGOPRI,@CODIGOSEC,@NOMBREITEM,@TIPOITEM,@CANTIDAD,@PRECIO,@SUBTOTAL,@DESCUENTO,@IVA,@NETO,@GRABAIVA,@PORIVA)";
+                                                try
+                                                {
+                                                    // Inserción de la Detalle.
+                                                    var affectedRows2 = db32.Execute(querInsertDET, new
+                                                    {
+                                                        @EMPRESA = det_ncr.EMPRESA,
+                                                        @SUCURSAL = det_ncr.SUCURSAL,
+                                                        @SERIE = det_ncr.SERIE,
+                                                        @NUMERO = det_ncr.NUMERO,
+                                                        @LINEA = det_ncr.LINEA,
+                                                        @CODIGOPRI = det_ncr.CODIGOPRI,
+                                                        @CODIGOSEC = det_ncr.CODIGOSEC,
+                                                        @NOMBREITEM = det_ncr.NOMBREITEM,
+                                                        @TIPOITEM = det_ncr.TIPOITEM,
+                                                        @CANTIDAD = det_ncr.CANTIDAD,
+                                                        @PRECIO = det_ncr.PRECIO,
+                                                        @SUBTOTAL = det_ncr.SUBTOTAL,
+                                                        @DESCUENTO = det_ncr.DESCUENTO,
+                                                        @IVA = det_ncr.IVA,
+                                                        @NETO = det_ncr.NETO,
+                                                        @GRABAIVA = det_ncr.GRABAIVA,
+                                                        @PORIVA = det_ncr.PORIVA
+
+                                                    });
+                                                    Console.WriteLine("Nuevo Detalle de NCR Insertado en APOLO. " + affectedRows2);
+                                                    numLinea++;
+                                                }
+                                                catch (Exception e)
+                                                {
+                                                    throw e;
+                                                }
+                                            }
+                                        }
+                                        else
+                                        {
+                                            Console.WriteLine("Detalle NCR ya Existe en APOLO.");
+                                            numLinea++;
+                                        }
+                                    }
+                                }
+                                catch (Exception e)
+                                {
+                                    throw e;
+
+                                }
+                            }
+
+                        }
+                        else
+                        {
+                            Console.WriteLine("Ya existe Cabecera de NCR en Base de Datos");
+                        }
+                    }
+                }
+            }
+        }
+
+
+
+        class FormattedDecimalConverter : JsonConverter
+        {
+            private CultureInfo culture;
+
+            public FormattedDecimalConverter(CultureInfo culture)
+            {
+                this.culture = culture;
+            }
+
+            public override bool CanConvert(Type objectType)
+            {
+                return (objectType == typeof(decimal) ||
+                        objectType == typeof(double) ||
+                        objectType == typeof(float));
+            }
+
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+            {
+                writer.WriteValue(Convert.ToString(value, culture));
+            }
+
+            public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+            {
+                throw new NotImplementedException();
+            }
+        }
 
         public static void postRequets(List<APFACTURACAB> lista, Uri endpoint, string metodo)
         {
@@ -608,33 +1071,5 @@ namespace ConorteClientAPI
 
         }
     }
-
-
-
-    class FormattedDecimalConverter : JsonConverter
-    {
-        private CultureInfo culture;
-
-        public FormattedDecimalConverter(CultureInfo culture)
-        {
-            this.culture = culture;
-        }
-
-        public override bool CanConvert(Type objectType)
-        {
-            return (objectType == typeof(decimal) ||
-                    objectType == typeof(double) ||
-                    objectType == typeof(float));
-        }
-
-        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
-        {
-            writer.WriteValue(Convert.ToString(value, culture));
-        }
-
-        public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
-        }
-    }
 }
+
