@@ -67,6 +67,8 @@
   <ItemGroup>
     <Compile Include="Models\APFACTURACAB.cs" />
     <Compile Include="Models\APFACTURADET.cs" />
+    <Compile Include="Models\APLIQUIDACIONCAB.cs" />
+    <Compile Include="Models\APLIQUIDACIONDET.cs" />
     <Compile Include="Models\APNCRCAB.cs" />
     <Compile Include="Models\APNCRDET.cs" />
     <Compile Include="Models\APRETENCION.cs" />

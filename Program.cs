@@ -55,6 +55,7 @@ namespace ConorteClientAPI
         public static List<ArchivoXML> liq = new List<ArchivoXML>();
         public static List<ArchivoXML> ncr = new List<ArchivoXML>();
         public static List<ArchivoXML> ret = new List<ArchivoXML>();
+        ////public static List<ArchivoXML> liq = new List<ArchivoXML>();
         static void Main(string[] args)
         {
             List<Notificacion> notifications = new List<Notificacion>();
@@ -79,12 +80,16 @@ namespace ConorteClientAPI
                     {
                         ncr.Add(item_doc);
                     }
+                    else if (typ == "03")
+                    {
+                        liq.Add(item_doc);
+                    }
                 }
 
                 facturas_proccess();
                 retenciones_proccess();
                 notaCredito_proccess();
-
+                liquidacion_process();
                 Thread.Sleep(2000);
             }
 
@@ -1011,6 +1016,303 @@ namespace ConorteClientAPI
                     }
                 }
             }
+        }
+
+
+        public static void liquidacion_process()
+        {
+
+            System.IFormatProvider cultureUS = new System.Globalization.CultureInfo("en-US");
+            if (liq.Count > 0)
+            {
+                List<APLIQUIDACIONCAB> cabcerasLiqui = new List<APLIQUIDACIONCAB>();
+                foreach (ArchivoXML item in liq)
+                {
+                    string xml_liq = item.XML;
+
+                    XmlDocument doc_xml = new XmlDocument();
+                    doc_xml.LoadXml(xml_liq);
+                    string jsonText = JsonConvert.SerializeXmlNode(doc_xml);
+                    JObject json_obj = JObject.Parse(jsonText);
+
+                    APLIQUIDACIONCAB cab_liq = new APLIQUIDACIONCAB();
+                    APLIQUIDACIONDET det_liq = new APLIQUIDACIONDET();
+                 
+
+                    string rucEmpresa = (string)json_obj["liquidacionCompra"]["infoTributaria"]["ruc"];
+
+                    // Consultar Número de Empresa dependiendo el RUC.
+                    using (IDbConnection db2 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                    {
+                        string queryEmpresa = "SELECT EMPRESA FROM APEMPRESA WHERE RUC = '" + rucEmpresa + "'";
+                        dynamic row = db2.Query(queryEmpresa).First();
+                        int empresa = Convert.ToInt32(row.EMPRESA);
+                        cab_liq.EMPRESA = empresa;
+                    }
+                    cab_liq.SUCURSAL = 1;
+                    string estab = (string)json_obj["liquidacionCompra"]["infoTributaria"]["estab"];
+                    string ptoEmi = (string)json_obj["liquidacionCompra"]["infoTributaria"]["ptoEmi"];
+                    long numero = (long)json_obj["liquidacionCompra"]["infoTributaria"]["secuencial"];
+                    decimal subtotalfac = (decimal)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["totalSinImpuestos"];
+                    decimal descuento = (decimal)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["totalDescuento"];
+
+                    int count = (int)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["totalConImpuestos"].Count();
+
+                    if (count == 1)
+                    {
+                        cab_liq.SUBTOTALCERO = 0;
+                        cab_liq.IVA = (decimal)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["totalConImpuestos"]["totalImpuesto"]["valor"];
+                    }
+                    else
+                    {
+                        IList<JToken> results = json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["totalConImpuestos"]["totalImpuesto"].Children().ToList();
+
+                        // serialize JSON results into .NET objects
+                        IList<TotalImpuesto> searchResults = new List<TotalImpuesto>();
+                        foreach (JToken result in results)
+                        {
+                            // JToken.ToObject is a helper method that uses JsonSerializer internally
+                            TotalImpuesto searchResult = result.ToObject<TotalImpuesto>();
+                            if (searchResult.codigoPorcentaje == 0)
+                            {
+                                cab_liq.SUBTOTALCERO = Convert.ToDecimal(searchResult.baseImponible, cultureUS);
+                            }
+                            else
+                            {
+                                cab_liq.IVA = Convert.ToDecimal(searchResult.valor, cultureUS);
+                            }
+                            searchResults.Add(searchResult);
+                        }
+                    }
+
+
+                    cab_liq.SERIE = estab + ptoEmi;
+                    cab_liq.NUMERO = numero.ToString();
+                    cab_liq.SUBTOTALIVA = Convert.ToDecimal(subtotalfac);
+                    cab_liq.DESCUENTO = Convert.ToDecimal(descuento);
+                    cab_liq.NETO = Convert.ToDecimal((decimal)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["importeTotal"], cultureUS);
+                    cab_liq.FECHAEMI = (string)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["fechaEmision"];
+                    //cab_liq.FECHAVEN = cab_factura.FECHAEMI;
+                    cab_liq.RUC = (string)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["identificacionProveedor"];
+                    //cab_liq.TIPOIDENTIFICACION = (string)json_obj["factura"]["infoFactura"]["tipoIdentificacionComprador"];
+                    cab_liq.NOMBRE = (string)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["razonSocialProveedor"];
+                    cab_liq.CORREO = "test@gmail.com";
+                    cab_liq.TELEFONO = "";
+                    cab_liq.DIRECCION = "";
+                    IList<JToken> camposAdi = json_obj["liquidacionCompra"]["infoAdicional"]["campoAdicional"].Children().ToList();
+
+                    foreach (JToken itemAdi in camposAdi)
+                    {
+                        if (itemAdi.Value<string>("@nombre") == "direccion")
+                        {
+                            cab_liq.DIRECCION = (string)itemAdi["#text"];
+                        }
+                        else if (itemAdi.Value<string>("@nombre") == "telefono")
+                        {
+                            cab_liq.TELEFONO = (string)itemAdi["#text"];
+                        }
+                        else if (itemAdi.Value<string>("@nombre") == "correo")
+                        {
+                            cab_liq.CORREO = (string)itemAdi["#text"];
+                        }
+                    }
+                    
+                    cab_liq.FORMAPAGO = (string)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["pagos"]["pago"]["formaPago"];
+                    cab_liq.PLAZO = (string)json_obj["liquidacionCompra"]["infoLiquidacionCompra"]["pagos"]["pago"]["plazo"]; ;
+                    cab_liq.TIPO = "LIQ";
+
+                    //cab_liq.CODCLIENTE = (string)json_obj["factura"]["infoFactura"]["identificacionComprador"];
+                    //cab_liq.VENDEDOR = "VEN1";
+                    //cab_liq.OBSERVACION = "Liquidacion desde MasterWare";
+
+
+                    // Cambio de los código de tipos de identificación a los de APOLO.
+                    //if (cab_factura.TIPOIDENTIFICACION == "04")
+                    //{
+                    //    cab_factura.TIPOIDENTIFICACION = "R";
+                    //}
+                    //else if (cab_factura.TIPOIDENTIFICACION == "05")
+                    //{
+                    //    cab_factura.TIPOIDENTIFICACION = "C";
+                    //}
+                    //else if (cab_factura.TIPOIDENTIFICACION == "07")
+                    //{
+                    //    cab_factura.TIPOIDENTIFICACION = "F";
+                    //}
+                    //else
+                    //{
+                    //    cab_factura.TIPOIDENTIFICACION = "0";
+                    //}
+
+                    string secuencial = (string)json_obj["liquidacionCompra"]["infoTributaria"]["secuencial"];
+                    string documentID = cab_liq.TIPO + "-" + estab + "-" + ptoEmi + "-" + secuencial;
+
+                    using (IDbConnection con = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                    {
+                        //Revisar si ya ha sido insertada esa Liquidacion.
+                        string sqlExist = "SELECT COUNT(*) AS CONTADOR FROM APLIQUIDACIONCAB WHERE SERIE = '" + cab_liq.SERIE + "' AND NUMERO = '" + cab_liq.NUMERO + "' AND EMPRESA = " + cab_liq.EMPRESA;
+                        dynamic result = con.Query(sqlExist).First();
+                        int contador = result.CONTADOR;
+                        if (contador == 0)
+                        {
+
+                            using (IDbConnection db3 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                            {
+                                string querInsertCAB = "INSERT INTO APLIQUIDACIONCAB(EMPRESA,SUCURSAL,SERIE,NUMERO,FECHAEMI,RUC,NOMBRE,SUBTOTALIVA,"+
+                                    "SUBTOTALCERO,IVA,DESCUENTO,NETO,FORMAPAGO,PLAZO,CORREO,TELEFONO,DIRECCION,SUBIDOALAWEB,ACTUALIZADOSC,ENVIACORREO,"+
+                                    "REGION,SUBIRWEB,ANULADO,TIPO) VALUES(@EMPRESA,@SUCURSAL,@SERIE,@NUMERO,@FECHAEMI,@RUC,@NOMBRE,@SUBTOTALIVA,"+
+                                    "@SUBTOTALCERO,@IVA,@DESCUENTO,@NETO,@FORMAPAGO,@PLAZO,@CORREO,@TELEFONO,@DIRECCION,@SUBIDOALAWEB,@ACTUALIZADOSC,"+
+                                    "@ENVIACORREO,@REGION,@SUBIRWEB,@ANULADO,@TIPO)";
+                                try
+                                {
+                                    // Inserción de la cabecera de Liquidacion.
+                                    var affectedRows = db3.Execute(querInsertCAB, new
+                                    {
+                                        @EMPRESA = cab_liq.EMPRESA,
+                                        @SUCURSAL = cab_liq.SUCURSAL,
+                                        @SERIE = cab_liq.SERIE,
+                                        @NUMERO = cab_liq.NUMERO,
+                                        @FECHAEMI = cab_liq.FECHAEMI,
+                                        @RUC = cab_liq.RUC,
+                                        @NOMBRE = cab_liq.NOMBRE,
+                                        @SUBTOTALIVA = cab_liq.SUBTOTALIVA,
+                                        @SUBTOTALCERO = cab_liq.SUBTOTALCERO,
+                                        @IVA = cab_liq.IVA,
+                                        @DESCUENTO = cab_liq.DESCUENTO,
+                                        @NETO = cab_liq.NETO,
+                                        @FORMAPAGO = cab_liq.FORMAPAGO,
+                                        @PLAZO = cab_liq.PLAZO,
+                                        @CORREO = cab_liq.CORREO,
+                                        @TELEFONO = cab_liq.TELEFONO,
+                                        @DIRECCION = cab_liq.DIRECCION,
+                                        @SUBIDOALAWEB = 'N',
+                                        @ACTUALIZADOSC = 'N',
+                                        @ENVIACORREO = 'N',
+                                        @REGION = 1,
+                                        @SUBIRWEB = 'N',
+                                        @ANULADO = 'N',
+                                        @TIPO = cab_liq.TIPO
+                                      
+                                    });
+                                    Console.WriteLine("Nueva Cabecera de Liquidacion Insertada en APOLO. " + cab_liq.NUMERO);
+
+                                    //···················##################### DETALLES DE LIQUIDACIÓN ##########################................................
+
+                                    IList<JToken> detalles = json_obj["liquidacionCompra"]["detalles"]["detalle"].Children().ToList();
+
+                                    //Nuevo procedimiento para solucion de un unico detalle.
+                                    int numLinea = 1;
+                                    var xml = XElement.Parse(xml_liq);
+                                    SerializerM ser = new SerializerM();
+                                    var detallesFAC = xml.DescendantsAndSelf("detalle");
+
+                                    foreach (var detalleIndividual in detallesFAC)
+                                    {
+                                        det_liq.EMPRESA = cab_liq.EMPRESA;
+                                        det_liq.SUCURSAL = 1;
+                                        det_liq.SERIE = cab_liq.SERIE;
+                                        det_liq.NUMERO = cab_liq.NUMERO;
+                                        det_liq.LINEA = numLinea;
+                                        det_liq.CODIGOPRI = detalleIndividual.Element("codigoPrincipal").Value.Trim();
+                                        //det_liq.CODIGOSEC = detalleIndividual.Element("codigoPrincipal").Value.Trim();
+                                        det_liq.NOMBRE = detalleIndividual.Element("descripcion").Value.Trim();
+                                        //det_liq.TIPOITEM = "B";
+                                        det_liq.CANTIDAD = Convert.ToInt32(detalleIndividual.Element("cantidad").Value.Trim());
+                                        det_liq.PRECIO = Convert.ToDecimal(detalleIndividual.Element("precioUnitario").Value.Trim(), cultureUS);
+                                        det_liq.SUBTOTAL = Convert.ToDecimal(detalleIndividual.Element("precioTotalSinImpuesto").Value.Trim(), cultureUS);
+                                        det_liq.DESCUENTO = Convert.ToDecimal(detalleIndividual.Element("descuento").Value.Trim(), cultureUS);
+
+                                        //Impuestos del Detalle
+                                        var impuestos = detalleIndividual.DescendantsAndSelf("impuesto");
+
+                                        foreach (var impuesto1 in impuestos)
+                                        {
+                                            if (Convert.ToInt32(impuesto1.Element("codigo").Value.Trim()) == 0)
+                                            {
+                                                det_liq.IVA = 0;
+                                                //det_liq.GRABAIVA = "N";
+                                                //det_liq.PORIVA = 0;
+                                                det_liq.NETO = det_liq.SUBTOTAL;
+                                                Console.WriteLine("el impuesto es de codigo 0");
+                                            }
+                                            else
+                                            {
+                                                det_liq.IVA = Convert.ToDecimal(impuesto1.Element("valor").Value.Trim(), cultureUS);
+                                                det_liq.NETO = det_liq.SUBTOTAL + det_liq.IVA;
+                                                //det_factura.GRABAIVA = "S";
+                                                //det_factura.PORIVA = Convert.ToDecimal(impuesto1.Element("tarifa").Value.Trim(), cultureUS);
+                                                Console.WriteLine("el impuesto de diferente codigo ");
+                                            }
+                                        }
+
+                                        using (IDbConnection con2 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                                        {
+                                            //Revisar si ya ha sido insertada esa Liquidacion.
+                                            string sqlExist2 = "SELECT COUNT(*) AS CONTADOR FROM APLIQUIDACIONDET WHERE SERIE = '" + cab_liq.SERIE + "' AND NUMERO = '" + cab_liq.NUMERO + "' AND EMPRESA = " + cab_liq.EMPRESA + "AND LINEA = " + numLinea;
+                                            dynamic result2 = con.Query(sqlExist).First();
+                                            int contador2 = result.CONTADOR;
+                                            if (contador == 0)
+                                            {
+
+                                                using (IDbConnection db32 = new SqlConnection(ConfigurationManager.ConnectionStrings["SEVERAPOLO"].ConnectionString))
+                                                {
+                                                    string querInsertDET = "INSERT INTO APLIQUIDACIONDET(EMPRESA,SUCURSAL,SERIE,NUMERO,CODIGOPRI,NOMBRE,PRECIO,CANTIDAD,"+
+                                                        "SUBTOTAL,DESCUENTO,IVA,NETO,LINEA) VALUES(@EMPRESA, @SUCURSAL, @SERIE, @NUMERO, @CODIGOPRI, @NOMBRE, @PRECIO, "+
+                                                        "@CANTIDAD, @SUBTOTAL, @DESCUENTO, @IVA, @NETO, @LINEA)";
+                                                    try
+                                                    {
+                                                        // Inserción de la cabecera de  Liquidacion.
+                                                        var affectedRows2 = db32.Execute(querInsertDET, new
+                                                        {
+                                                            @EMPRESA = det_liq.EMPRESA,
+                                                            @SUCURSAL = det_liq.SUCURSAL,
+                                                            @SERIE = det_liq.SERIE,
+                                                            @NUMERO = det_liq.NUMERO,
+                                                            @CODIGOPRI = det_liq.CODIGOPRI,
+                                                            @NOMBRE = det_liq.NOMBRE,
+                                                            @PRECIO = det_liq.PRECIO,
+                                                            @CANTIDAD = det_liq.CANTIDAD,
+                                                            @SUBTOTAL = det_liq.SUBTOTAL,
+                                                            @DESCUENTO = det_liq.DESCUENTO,
+                                                            @IVA = det_liq.IVA,
+                                                            @NETO = det_liq.NETO,
+                                                            @LINEA = det_liq.LINEA
+                                                        });
+                                                        // Console.WriteLine("Nuevo Detalle de Liquidacion Insertada en APOLO. " + affectedRows2);
+                                                        numLinea++;
+                                                    }
+                                                    catch (Exception e)
+                                                    {
+                                                        throw e;
+                                                    }
+                                                }
+                                            }
+                                            else
+                                            {
+                                                // Console.WriteLine("Detalle Liq ya Existe en APOLO.");
+                                                numLinea++;
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (Exception e)
+                                {
+                                    throw e;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("Liquidacion ya Existe en APOLO.");
+                        }
+                    }
+                    //agregar cabecera al array.
+                    //cabcerasFac.Add(cab_factura);
+                    //Uri ul = new Uri("http://apiapolo.test:8088");
+                    //postRequets(cabcerasFac, ul, "post");
+                }
+            }
+
         }
 
 
